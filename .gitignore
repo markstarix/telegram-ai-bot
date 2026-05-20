@@ -1,0 +1,24 @@
+# Переменные окружения (НЕ заливай в git!)
+.env
+
+# База данных
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Временные файлы
+*.ogg
+*.mp3
+*.tmp
+
+# IDE
+.idea/
+.vscode/
+*.swp
