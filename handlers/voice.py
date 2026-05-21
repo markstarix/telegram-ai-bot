@@ -1,5 +1,6 @@
 import os
 import tempfile
+import logging
 from html import escape
 
 from aiogram import Router, F
@@ -11,6 +12,7 @@ from database.db import get_history, save_message
 
 router = Router()
 ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
+logger = logging.getLogger(__name__)
 
 
 @router.message(F.voice)
@@ -54,8 +56,9 @@ async def voice_handler(message: Message):
         await save_message(user_id, "assistant", answer)
         await message.answer(answer)
 
-    except Exception as e:
-        await message.answer(f"❌ Ошибка обработки голосового: {e}")
+    except Exception:
+        logger.exception("Voice processing failed")
+        await message.answer("❌ Ошибка обработки голосового. Попробуй позже.")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)

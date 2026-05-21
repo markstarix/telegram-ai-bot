@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 from html import escape
 
 from aiogram import Router
@@ -9,6 +10,7 @@ from config import ADMIN_ID
 from database.db import get_stats
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 def is_admin(message: Message) -> bool:
@@ -27,8 +29,9 @@ async def ban_handler(message: Message):
     try:
         await message.chat.ban(target.id)
         await message.answer(f"🚫 Пользователь <b>{escape(target.full_name)}</b> забанен.")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+    except Exception:
+        logger.exception("Ban command failed")
+        await message.answer("❌ Не удалось забанить пользователя.")
 
 
 @router.message(Command("unban"))
@@ -43,8 +46,9 @@ async def unban_handler(message: Message):
     try:
         await message.chat.unban(target.id)
         await message.answer(f"✅ Пользователь <b>{escape(target.full_name)}</b> разбанен.")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+    except Exception:
+        logger.exception("Unban command failed")
+        await message.answer("❌ Не удалось разбанить пользователя.")
 
 
 @router.message(Command("mute"))
@@ -64,8 +68,9 @@ async def mute_handler(message: Message):
             until_date=until
         )
         await message.answer(f"🔇 Пользователь <b>{escape(target.full_name)}</b> заглушен на 1 час.")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+    except Exception:
+        logger.exception("Mute command failed")
+        await message.answer("❌ Не удалось заглушить пользователя.")
 
 
 @router.message(Command("stats"))
