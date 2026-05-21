@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from html import escape
 
 from aiogram import Router
 from aiogram.types import Message, ChatPermissions
@@ -25,7 +26,7 @@ async def ban_handler(message: Message):
     target = message.reply_to_message.from_user
     try:
         await message.chat.ban(target.id)
-        await message.answer(f"🚫 Пользователь <b>{target.full_name}</b> забанен.")
+        await message.answer(f"🚫 Пользователь <b>{escape(target.full_name)}</b> забанен.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
@@ -41,7 +42,7 @@ async def unban_handler(message: Message):
     target = message.reply_to_message.from_user
     try:
         await message.chat.unban(target.id)
-        await message.answer(f"✅ Пользователь <b>{target.full_name}</b> разбанен.")
+        await message.answer(f"✅ Пользователь <b>{escape(target.full_name)}</b> разбанен.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
@@ -62,7 +63,7 @@ async def mute_handler(message: Message):
             permissions=ChatPermissions(can_send_messages=False),
             until_date=until
         )
-        await message.answer(f"🔇 Пользователь <b>{target.full_name}</b> заглушен на 1 час.")
+        await message.answer(f"🔇 Пользователь <b>{escape(target.full_name)}</b> заглушен на 1 час.")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 

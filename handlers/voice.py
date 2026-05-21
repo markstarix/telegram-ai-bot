@@ -1,5 +1,6 @@
 import os
 import tempfile
+from html import escape
 
 from aiogram import Router, F
 from aiogram.types import Message
@@ -16,6 +17,7 @@ ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 async def voice_handler(message: Message):
     await message.answer("🎙 Распознаю голосовое сообщение...")
 
+    tmp_path = None
     try:
         voice_file = await message.bot.get_file(message.voice.file_id)
 
@@ -30,10 +32,9 @@ async def voice_handler(message: Message):
                 file=audio
             )
 
-        os.unlink(tmp_path)
         text = transcript.text
 
-        await message.answer(f"🗣 <b>Ты сказал:</b> <i>{text}</i>")
+        await message.answer(f"🗣 <b>Ты сказал:</b> <i>{escape(text)}</i>")
         await message.bot.send_chat_action(message.chat.id, "typing")
 
         user_id = message.from_user.id
@@ -55,3 +56,6 @@ async def voice_handler(message: Message):
 
     except Exception as e:
         await message.answer(f"❌ Ошибка обработки голосового: {e}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)

@@ -1,5 +1,6 @@
 import time
 from collections import defaultdict
+from html import escape
 from typing import Callable, Any, Awaitable
 
 from aiogram import BaseMiddleware
@@ -26,10 +27,14 @@ class AntiSpamMiddleware(BaseMiddleware):
         user_id = event.from_user.id
         now = time.time()
 
-        self.user_messages[user_id] = [
+        recent_messages = [
             t for t in self.user_messages[user_id]
             if now - t < SPAM_WINDOW
         ]
+        if recent_messages:
+            self.user_messages[user_id] = recent_messages
+        else:
+            self.user_messages.pop(user_id, None)
         self.user_messages[user_id].append(now)
 
         if len(self.user_messages[user_id]) > SPAM_LIMIT:
@@ -37,10 +42,11 @@ class AntiSpamMiddleware(BaseMiddleware):
                 await event.chat.ban(user_id)
                 await increment_banned()
                 await event.answer(
-                    f"🚫 <b>{event.from_user.full_name}</b> забанен за спам!"
+                    f"🚫 <b>{escape(event.from_user.full_name)}</b> забанен за спам!"
                 )
             except Exception:
                 pass
+            self.user_messages.pop(user_id, None)
             return
 
         return await handler(event, data)
