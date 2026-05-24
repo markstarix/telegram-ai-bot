@@ -7,7 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
 from database.db import init_db
-from handlers import ai_chat, image_gen, voice, admin
+from handlers import ai_chat, image_gen, voice, admin, antislut
 from middlewares.antispam import AntiSpamMiddleware
 
 logging.basicConfig(
@@ -28,6 +28,7 @@ async def main():
 
     dp.message.middleware(AntiSpamMiddleware())
 
+    dp.include_router(antislut.router)  # первым — чтобы банил до других обработчиков
     dp.include_router(admin.router)
     dp.include_router(image_gen.router)
     dp.include_router(voice.router)
@@ -36,7 +37,9 @@ async def main():
     logger.info("Bot started!")
 
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, allowed_updates=[
+        "message", "chat_member", "message_reaction", "callback_query"
+    ])
 
 
 if __name__ == "__main__":
