@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart, Command
 from openai import AsyncOpenAI
 
 from config import OPENAI_API_KEY, AI_MODEL, IMAGE_MODEL, MAX_HISTORY
-from database.db import get_history, save_message, clear_history
+from database.db import get_history, save_message, clear_history, get_image_usage, increment_image_usage
 from services.rates import (
     detect_rates_request, get_crypto_price,
     get_single_fiat_rate, get_cbr_rates
@@ -14,6 +14,8 @@ from services.rates import (
 
 router = Router()
 ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+DAILY_IMAGE_LIMIT = 3
 
 IMAGE_TRIGGERS = [
     "сгенерируй фото", "сгенерируй картинку", "сгенерируй изображение",
@@ -75,7 +77,7 @@ async def start_handler(message: Message):
         "Я — твой AI-помощник. Вот что я умею:\n\n"
         "💬 Напиши мне — отвечу на любой вопрос\n"
         "💱 Спроси курс — <b>курс BTC</b>, <b>курс доллара</b>\n"
-        "🖼 Напиши <b>сгенерируй/создай/нарисуй фото ...</b> — сделаю картинку\n"
+        f"🖼 Напиши <b>сгенерируй/создай/нарисуй фото ...</b> — сделаю картинку (до {DAILY_IMAGE_LIMIT} в день)\n"
         "🔊 Отправь голосовое — распознаю и отвечу\n"
         "🗑 /clear — очищу историю диалога\n"
         "❓ /help — список всех команд"
@@ -89,7 +91,7 @@ async def help_handler(message: Message):
         "💬 <b>Текст</b> — задай любой вопрос\n"
         "💱 <b>Курс BTC / ETH / TON</b> — курс крипты\n"
         "💱 <b>Курс доллара / евро</b> — курс валют ЦБ РФ\n"
-        "🖼 <b>Сгенерируй/создай фото ...</b> — генерация изображения\n"
+        f"🖼 <b>Сгенерируй/создай фото ...</b> — генерация изображения (до {DAILY_IMAGE_LIMIT} в день)\n"
         "🔊 <b>Голосовое</b> — распознавание речи + ответ\n"
         "🗑 /clear — очистить историю диалога\n"
         "❓ /help — эта справка"
@@ -128,13 +130,23 @@ async def chat_handler(message: Message):
     try:
         # 1. Генерация изображения
         if await is_image_request(user_text):
+            usage = await get_image_usage(user_id)
+            if usage >= DAILY_IMAGE_LIMIT:
+                await message.answer(
+                    f"🚫 Ты уже сгенерировал {DAILY_IMAGE_LIMIT} изображения сегодня.\n"
+                    "⏳ Лимит обновится в полночь (00:00 UTC)."
+                )
+                return
+
             await message.answer("🎨 Генерирую изображение, подожди...")
             await message.bot.send_chat_action(message.chat.id, "upload_photo")
             prompt = await extract_image_prompt(user_text)
             image_file = await generate_image(prompt)
+            await increment_image_usage(user_id)
+            remaining = DAILY_IMAGE_LIMIT - usage - 1
             await message.answer_photo(
                 photo=image_file,
-                caption=f"🖼 <i>{user_text}</i>"
+                caption=f"🖼 <i>{user_text}</i>\n\n<i>Осталось генераций сегодня: {remaining}</i>"
             )
             return
 

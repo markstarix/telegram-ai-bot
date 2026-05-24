@@ -1,5 +1,6 @@
 import aiosqlite
 from config import DB_PATH
+from datetime import date
 
 
 async def init_db():
@@ -21,6 +22,14 @@ async def init_db():
         """)
         await db.execute("""
             INSERT OR IGNORE INTO stats (id, banned_count) VALUES (1, 0)
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS image_usage (
+                user_id INTEGER NOT NULL,
+                usage_date TEXT NOT NULL,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, usage_date)
+            )
         """)
         await db.commit()
 
@@ -69,4 +78,31 @@ async def get_stats() -> dict:
 async def increment_banned():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE stats SET banned_count = banned_count + 1 WHERE id = 1")
+        await db.commit()
+
+
+async def get_image_usage(user_id: int) -> int:
+    """Возвращает количество генераций фото за сегодня"""
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT count FROM image_usage WHERE user_id = ? AND usage_date = ?",
+            (user_id, today)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row else 0
+
+
+async def increment_image_usage(user_id: int):
+    """Увеличивает счётчик генераций фото за сегодня"""
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO image_usage (user_id, usage_date, count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(user_id, usage_date) DO UPDATE SET count = count + 1
+            """,
+            (user_id, today)
+        )
         await db.commit()
