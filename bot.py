@@ -8,6 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN
 from database.db import init_db
 from handlers import ai_chat, image_gen, voice, admin, antislut
+from handlers.antislut import AntiSlutMiddleware
 from middlewares.antispam import AntiSpamMiddleware
 
 logging.basicConfig(
@@ -26,9 +27,10 @@ async def main():
     )
     dp = Dispatcher()
 
+    dp.message.middleware(AntiSlutMiddleware())  # проверяет на шлюхоботов, не блокирует ai_chat
     dp.message.middleware(AntiSpamMiddleware())
 
-    dp.include_router(antislut.router)  # первым — чтобы банил до других обработчиков
+    dp.include_router(antislut.router)  # chat_member + реакции
     dp.include_router(admin.router)
     dp.include_router(image_gen.router)
     dp.include_router(voice.router)
