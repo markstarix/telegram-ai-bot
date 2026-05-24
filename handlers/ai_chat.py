@@ -6,12 +6,10 @@ from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from openai import AsyncOpenAI
 
-from config import OPENAI_API_KEY, AI_MODEL, IMAGE_MODEL, MAX_HISTORY
+from config import OPENAI_API_KEY, AI_MODEL, IMAGE_MODEL, MAX_HISTORY, TAVILY_API_KEY
 from database.db import get_history, save_message, clear_history, get_image_usage, increment_image_usage
-from services.rates import (
-    detect_rates_request, get_crypto_price,
-    get_single_fiat_rate, get_cbr_rates
-)
+from services.rates import detect_rates_request, get_crypto_price, get_single_fiat_rate
+from services.search import needs_search, web_search
 
 router = Router()
 ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -86,6 +84,7 @@ async def start_handler(message: Message):
         f"👋 Привет, <b>{message.from_user.full_name}</b>!\n\n"
         "Я — твой AI-помощник. Вот что я умею:\n\n"
         "💬 Напиши мне — отвечу на любой вопрос\n"
+        "🌐 Спрошу интернет если нужна актуальная информация\n"
         "💱 Спроси курс — <b>курс BTC</b>, <b>курс доллара</b>\n"
         f"🖼 Напиши <b>сгенерируй/создай/нарисуй фото ...</b> — сделаю картинку (до {DAILY_IMAGE_LIMIT} в день)\n"
         "🔊 Отправь голосовое — распознаю и отвечу\n"
@@ -99,6 +98,7 @@ async def help_handler(message: Message):
     await message.answer(
         "📋 <b>Список команд:</b>\n\n"
         "💬 <b>Текст</b> — задай любой вопрос\n"
+        "🌐 Актуальные события — бот сам ищет в интернете\n"
         "💱 <b>Курс BTC / ETH / TON</b> — курс крипты\n"
         "💱 <b>Курс доллара / евро</b> — курс валют ЦБ РФ\n"
         f"🖼 <b>Сгенерируй/создай фото ...</b> — генерация изображения (до {DAILY_IMAGE_LIMIT} в день)\n"
@@ -164,28 +164,33 @@ async def chat_handler(message: Message):
         rate_request = detect_rates_request(user_text)
         if rate_request:
             kind, value = rate_request
-            if kind == "crypto":
-                result = await get_crypto_price(value)
-            else:
-                result = await get_single_fiat_rate(value)
-
+            result = await get_crypto_price(value) if kind == "crypto" else await get_single_fiat_rate(value)
             if result:
                 await message.answer(result)
                 return
 
-        # 3. Обычный AI-ответ
+        # 3. Веб-поиск для актуальных вопросов
         today = get_current_date_str()
+        search_context = ""
+        if TAVILY_API_KEY and needs_search(user_text):
+            search_result = await web_search(user_text, TAVILY_API_KEY)
+            if search_result:
+                search_context = f"\n\nАктуальная информация из интернета (используй её в ответе):\n{search_result}"
+
+        # 4. Обычный AI-ответ
         system_prompt = (
             f"Сегодня {today}. "
             "Ты умный AI-помощник в Telegram. "
             "Отвечай на русском языке если пишут по-русски. "
             "Будь точным и кратким."
+            + search_context
         ) if not is_group else (
             f"Сегодня {today}. "
             "Ты живой участник Telegram чата. "
             "Вмешивайся в разговор естественно и по теме. "
             "Отвечай коротко — 1-2 предложения. Без лишних вступлений. "
             "Пиши на том языке на котором пишут в чате."
+            + search_context
         )
 
         answer = await ask_ai(user_id, user_text, system_prompt)

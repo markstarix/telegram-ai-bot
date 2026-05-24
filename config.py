@@ -5,6 +5,7 @@ load_dotenv()
 
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 ADMIN_ID: int = int(os.getenv("ADMIN_ID", "0"))
 
 SPAM_LIMIT: int = 5
