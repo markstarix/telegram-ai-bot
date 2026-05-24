@@ -1,8 +1,9 @@
 import re
 import logging
+from typing import Callable, Dict, Any, Awaitable
 
-from aiogram import Router, F
-from aiogram.types import Message, ChatMemberUpdated, MessageReactionUpdated
+from aiogram import Router, F, BaseMiddleware
+from aiogram.types import Message, ChatMemberUpdated, MessageReactionUpdated, TelegramObject
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION
 
 from database.db import increment_banned, get_stats
@@ -26,7 +27,6 @@ SLUT_EMOJIS = ["💋", "🍑", "👅", "💦", "🔞", "😈", "🌶"]
 
 
 def is_slutbot(text: str) -> bool:
-    """Проверяет текст на паттерны шлюхобота"""
     if not text:
         return False
     text_lower = text.lower()
@@ -40,7 +40,6 @@ def is_slutbot(text: str) -> bool:
 
 
 async def ban_slutbot(bot, chat_id: int, user_id: int, username: str):
-    """Банит шлюхобота и отправляет сообщение со счётчиком"""
     try:
         await bot.ban_chat_member(chat_id, user_id)
         await increment_banned()
@@ -54,6 +53,32 @@ async def ban_slutbot(bot, chat_id: int, user_id: int, username: str):
         logger.info(f"Slutbot banned: {username} ({user_id}) in chat {chat_id}")
     except Exception as e:
         logger.warning(f"Failed to ban slutbot {user_id}: {e}")
+
+
+# ───── Middleware для проверки текстовых сообщений ─────
+# Использует middleware чтобы НЕ блокировать другие обработчики (ai_chat и т.д.)
+class AntiSlutMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: Dict[str, Any],
+    ) -> Any:
+        if event.chat.type in ("group", "supergroup") and event.from_user and not event.from_user.is_bot:
+            user = event.from_user
+            text = event.text or ""
+            full_name = f"{user.first_name or ''} {user.last_name or ''}"
+            username = user.username or full_name
+
+            if is_slutbot(text) or is_slutbot(full_name):
+                try:
+                    await event.delete()
+                except Exception:
+                    pass
+                await ban_slutbot(event.bot, event.chat.id, user.id, username)
+                return  # не передаём дальше — пользователь забанен
+
+        return await handler(event, data)
 
 
 # ───── 1. Проверка при заходе в чат ─────
@@ -75,28 +100,7 @@ async def on_user_join(event: ChatMemberUpdated):
         await ban_slutbot(event.bot, event.chat.id, user.id, username)
 
 
-# ───── 2. Проверка сообщения ─────
-@router.message(F.text)
-async def on_message_slutcheck(message: Message):
-    if not message.from_user or message.from_user.is_bot:
-        return
-    if message.chat.type not in ("group", "supergroup"):
-        return
-
-    user = message.from_user
-    text = message.text or ""
-    full_name = f"{user.first_name or ''} {user.last_name or ''}"
-    username = user.username or full_name
-
-    if is_slutbot(text) or is_slutbot(full_name):
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        await ban_slutbot(message.bot, message.chat.id, user.id, username)
-
-
-# ───── 3. Проверка реакций ─────
+# ───── 2. Проверка реакций ─────
 @router.message_reaction()
 async def on_reaction_slutcheck(event: MessageReactionUpdated):
     if not event.user or event.user.is_bot:
