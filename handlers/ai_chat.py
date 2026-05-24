@@ -1,5 +1,6 @@
 import random
 import base64
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
@@ -23,6 +24,15 @@ IMAGE_TRIGGERS = [
     "сделай фото", "сделай картинку", "сделай изображение",
     "нарисуй", "draw", "generate image", "create image"
 ]
+
+
+def get_current_date_str() -> str:
+    now = datetime.utcnow()
+    months = [
+        "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря"
+    ]
+    return f"{now.day} {months[now.month - 1]} {now.year} года"
 
 
 async def is_image_request(text: str) -> bool:
@@ -164,11 +174,14 @@ async def chat_handler(message: Message):
                 return
 
         # 3. Обычный AI-ответ
+        today = get_current_date_str()
         system_prompt = (
+            f"Сегодня {today}. "
             "Ты умный AI-помощник в Telegram. "
             "Отвечай на русском языке если пишут по-русски. "
             "Будь точным и кратким."
         ) if not is_group else (
+            f"Сегодня {today}. "
             "Ты живой участник Telegram чата. "
             "Вмешивайся в разговор естественно и по теме. "
             "Отвечай коротко — 1-2 предложения. Без лишних вступлений. "
