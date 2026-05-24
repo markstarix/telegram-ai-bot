@@ -7,6 +7,10 @@ from openai import AsyncOpenAI
 
 from config import OPENAI_API_KEY, AI_MODEL, IMAGE_MODEL, MAX_HISTORY
 from database.db import get_history, save_message, clear_history
+from services.rates import (
+    detect_rates_request, get_crypto_price,
+    get_single_fiat_rate, get_cbr_rates
+)
 
 router = Router()
 ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -20,8 +24,7 @@ IMAGE_TRIGGERS = [
 
 
 async def is_image_request(text: str) -> bool:
-    text_lower = text.lower()
-    return any(trigger in text_lower for trigger in IMAGE_TRIGGERS)
+    return any(trigger in text.lower() for trigger in IMAGE_TRIGGERS)
 
 
 async def extract_image_prompt(text: str) -> str:
@@ -71,6 +74,7 @@ async def start_handler(message: Message):
         f"👋 Привет, <b>{message.from_user.full_name}</b>!\n\n"
         "Я — твой AI-помощник. Вот что я умею:\n\n"
         "💬 Напиши мне — отвечу на любой вопрос\n"
+        "💱 Спроси курс — <b>курс BTC</b>, <b>курс доллара</b>\n"
         "🖼 Напиши <b>сгенерируй/создай/нарисуй фото ...</b> — сделаю картинку\n"
         "🔊 Отправь голосовое — распознаю и отвечу\n"
         "🗑 /clear — очищу историю диалога\n"
@@ -83,6 +87,8 @@ async def help_handler(message: Message):
     await message.answer(
         "📋 <b>Список команд:</b>\n\n"
         "💬 <b>Текст</b> — задай любой вопрос\n"
+        "💱 <b>Курс BTC / ETH / TON</b> — курс крипты\n"
+        "💱 <b>Курс доллара / евро</b> — курс валют ЦБ РФ\n"
         "🖼 <b>Сгенерируй/создай фото ...</b> — генерация изображения\n"
         "🔊 <b>Голосовое</b> — распознавание речи + ответ\n"
         "🗑 /clear — очистить историю диалога\n"
@@ -120,6 +126,7 @@ async def chat_handler(message: Message):
     await message.bot.send_chat_action(message.chat.id, "typing")
 
     try:
+        # 1. Генерация изображения
         if await is_image_request(user_text):
             await message.answer("🎨 Генерирую изображение, подожди...")
             await message.bot.send_chat_action(message.chat.id, "upload_photo")
@@ -131,6 +138,20 @@ async def chat_handler(message: Message):
             )
             return
 
+        # 2. Курсы валют и крипты
+        rate_request = detect_rates_request(user_text)
+        if rate_request:
+            kind, value = rate_request
+            if kind == "crypto":
+                result = await get_crypto_price(value)
+            else:
+                result = await get_single_fiat_rate(value)
+
+            if result:
+                await message.answer(result)
+                return
+
+        # 3. Обычный AI-ответ
         system_prompt = (
             "Ты умный AI-помощник в Telegram. "
             "Отвечай на русском языке если пишут по-русски. "
