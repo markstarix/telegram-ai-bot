@@ -1,6 +1,5 @@
 import re
 import logging
-from html import escape
 
 from aiogram import Router, F
 from aiogram.types import Message, ChatMemberUpdated, MessageReactionUpdated
@@ -12,25 +11,18 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 # ───── Паттерны шлюхоботов ─────
-SLUT_NAME_PATTERNS = [
+SLUT_PATTERNS = [
     r"onlyfan", r"only.?fan", r"of.?link", r"18\+", r"nsfw",
     r"\bсекс\b", r"\bintim", r"\bэскорт", r"\bescort",
     r"заработ", r"доход", r"\d{4,}.*руб", r"privat", r"vip.?girl",
     r"hot.?girl", r"sexy", r"xxx", r"porn", r"nude", r"naked",
     r"модел", r"фото.?видео", r"подпис", r"переход", r"ссылк",
-]
-
-SLUT_TEXT_PATTERNS = SLUTNAME_PATTERNS = [
-    r"onlyfan", r"only.?fan", r"18\+", r"nsfw", r"\bсекс\b",
-    r"\bintim", r"\bэскорт", r"заработ", r"доход в день",
-    r"privat", r"vip.?girl", r"hot.?girl", r"sexy", r"xxx",
-    r"porn", r"nude", r"naked", r"подпис", r"переход по ссылк",
     r"пиши в лс", r"пиши мне", r"напиши мне", r"писать в личк",
     r"t\.me\/\+", r"t\.me\/[a-z0-9_]{5,}",
-    r"💋", r"🔥.*💋", r"👅", r"🍑", r"💦",
+    r"доход в день",
 ]
 
-SLUT_EMOJI_THRESHOLD = 5  # Если >5 одинаковых эмодзи в имени/тексте
+SLUT_EMOJIS = ["💋", "🍑", "👅", "💦", "🔞", "😈", "🌶"]
 
 
 def is_slutbot(text: str) -> bool:
@@ -38,18 +30,16 @@ def is_slutbot(text: str) -> bool:
     if not text:
         return False
     text_lower = text.lower()
-    for pattern in SLUTNAME_PATTERNS:
+    for pattern in SLUT_PATTERNS:
         if re.search(pattern, text_lower):
             return True
-    # Проверка на обилие сексуальных эмодзи
-    slutty_emojis = ["💋", "🍑", "👅", "💦", "🔞", "😈", "🌶"]
-    for emoji in slutty_emojis:
+    for emoji in SLUT_EMOJIS:
         if text.count(emoji) >= 2:
             return True
     return False
 
 
-async def ban_slutbot(message_or_event, bot, chat_id: int, user_id: int, user_name: str):
+async def ban_slutbot(bot, chat_id: int, user_id: int, username: str):
     """Банит шлюхобота и отправляет сообщение со счётчиком"""
     try:
         await bot.ban_chat_member(chat_id, user_id)
@@ -61,7 +51,7 @@ async def ban_slutbot(message_or_event, bot, chat_id: int, user_id: int, user_na
             f"🚫 Шлюх*боты не пройдут 😎\n"
             f"┗ уничтожено: <b>{count}</b>",
         )
-        logger.info(f"Slutbot banned: {user_name} ({user_id}) in chat {chat_id}")
+        logger.info(f"Slutbot banned: {username} ({user_id}) in chat {chat_id}")
     except Exception as e:
         logger.warning(f"Failed to ban slutbot {user_id}: {e}")
 
@@ -73,17 +63,16 @@ async def on_user_join(event: ChatMemberUpdated):
     if user.is_bot:
         return
 
-    # Проверяем имя и фамилию
     full_name = f"{user.first_name or ''} {user.last_name or ''}"
+    username = user.username or full_name
+
     if is_slutbot(full_name):
-        await ban_slutbot(event, event.bot, event.chat.id, user.id, user.username or full_name)
+        await ban_slutbot(event.bot, event.chat.id, user.id, username)
         return
 
-    # Подозрительный профиль: нет юзернейма + странное имя
-    slutty_emojis = ["💋", "🍑", "👅", "💦", "🔞", "😈"]
-    emoji_count = sum(full_name.count(e) for e in slutty_emojis)
+    emoji_count = sum(full_name.count(e) for e in SLUT_EMOJIS)
     if emoji_count >= 2:
-        await ban_slutbot(event, event.bot, event.chat.id, user.id, user.username or full_name)
+        await ban_slutbot(event.bot, event.chat.id, user.id, username)
 
 
 # ───── 2. Проверка сообщения ─────
@@ -97,24 +86,25 @@ async def on_message_slutcheck(message: Message):
     user = message.from_user
     text = message.text or ""
     full_name = f"{user.first_name or ''} {user.last_name or ''}"
+    username = user.username or full_name
 
     if is_slutbot(text) or is_slutbot(full_name):
         try:
             await message.delete()
         except Exception:
             pass
-        await ban_slutbot(message, message.bot, message.chat.id, user.id, user.username or full_name)
+        await ban_slutbot(message.bot, message.chat.id, user.id, username)
 
 
 # ───── 3. Проверка реакций ─────
 @router.message_reaction()
 async def on_reaction_slutcheck(event: MessageReactionUpdated):
-    if not event.user:
-        return
-    user = event.user
-    if user.is_bot:
+    if not event.user or event.user.is_bot:
         return
 
+    user = event.user
     full_name = f"{user.first_name or ''} {user.last_name or ''}"
+    username = user.username or full_name
+
     if is_slutbot(full_name):
-        await ban_slutbot(event, event.bot, event.chat.id, user.id, user.username or full_name)
+        await ban_slutbot(event.bot, event.chat.id, user.id, username)
