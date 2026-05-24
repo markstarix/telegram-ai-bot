@@ -31,6 +31,12 @@ FIAT_KEYWORDS = {
     "йена": "JPY", "jpy": "JPY",
 }
 
+# Ключевые слова явного запроса курса
+RATE_KEYWORDS = [
+    "курс", "цена", "стоит", "сколько стоит", "почём", "rate", "price",
+    "сколько сейчас", "какой курс", "покажи курс", "курс сейчас"
+]
+
 
 async def get_crypto_price(coin_id: str) -> str | None:
     """Получает курс крипты через CoinGecko (бесплатно, без ключа)"""
@@ -99,23 +105,26 @@ async def get_single_fiat_rate(currency_code: str) -> str | None:
 def detect_rates_request(text: str) -> tuple[str, str] | None:
     """
     Определяет запрос курса в тексте.
-    Возвращает ('crypto', coin_id) или ('fiat', currency_code) или None
+    Возвращает ('crypto', coin_id) или ('fiat', currency_code) или None.
+    Срабатывает ТОЛЬКО если в сообщении есть явный запрос курса/цены.
     """
     text_lower = text.lower()
 
-    # Ключевые слова которые говорят что речь о курсе
-    rate_keywords = ["курс", "цена", "стоит", "сколько", "почём", "rate", "price"]
-    is_rate_request = any(kw in text_lower for kw in rate_keywords)
+    # Проверяем есть ли явный запрос курса/цены
+    is_rate_request = any(kw in text_lower for kw in RATE_KEYWORDS)
+
+    # Если нет явного запроса — не отвечаем курсом
+    if not is_rate_request:
+        return None
 
     # Проверяем крипту
     for keyword, coin_id in CRYPTO_IDS.items():
         if keyword in text_lower:
             return ("crypto", coin_id)
 
-    # Проверяем фиат — только если явный запрос курса
-    if is_rate_request:
-        for keyword, code in FIAT_KEYWORDS.items():
-            if keyword in text_lower:
-                return ("fiat", code)
+    # Проверяем фиат
+    for keyword, code in FIAT_KEYWORDS.items():
+        if keyword in text_lower:
+            return ("fiat", code)
 
     return None
