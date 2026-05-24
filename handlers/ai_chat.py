@@ -1,13 +1,68 @@
+import random
+import base64
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from openai import AsyncOpenAI
 
-from config import OPENAI_API_KEY, AI_MODEL, MAX_HISTORY
+from config import OPENAI_API_KEY, AI_MODEL, IMAGE_MODEL, MAX_HISTORY
 from database.db import get_history, save_message, clear_history
 
 router = Router()
 ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+IMAGE_TRIGGERS = [
+    "сгенерируй фото", "сгенерируй картинку", "сгенерируй изображение",
+    "создай фото", "создай картинку", "создай изображение",
+    "сделай фото", "сделай картинку", "сделай изображение",
+    "нарисуй", "draw", "generate image", "create image"
+]
+
+
+async def is_image_request(text: str) -> bool:
+    text_lower = text.lower()
+    return any(trigger in text_lower for trigger in IMAGE_TRIGGERS)
+
+
+async def extract_image_prompt(text: str) -> str:
+    response = await ai.chat.completions.create(
+        model=AI_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "Extract the image description from the message. Return only the description in English, no extra words."
+            },
+            {"role": "user", "content": text}
+        ],
+        max_tokens=100
+    )
+    return response.choices[0].message.content
+
+
+async def generate_image(prompt: str) -> BufferedInputFile:
+    result = await ai.images.generate(
+        model=IMAGE_MODEL,
+        prompt=prompt,
+        size="1024x1024",
+        quality="medium",
+        n=1
+    )
+    image_data = base64.b64decode(result.data[0].b64_json)
+    return BufferedInputFile(image_data, filename="image.png")
+
+
+async def ask_ai(user_id: int, user_text: str, system_prompt: str) -> str:
+    await save_message(user_id, "user", user_text)
+    history = await get_history(user_id, MAX_HISTORY)
+    messages = [{"role": "system", "content": system_prompt}] + history
+    response = await ai.chat.completions.create(
+        model=AI_MODEL,
+        messages=messages,
+        max_tokens=500
+    )
+    answer = response.choices[0].message.content
+    await save_message(user_id, "assistant", answer)
+    return answer
 
 
 @router.message(CommandStart())
@@ -15,8 +70,8 @@ async def start_handler(message: Message):
     await message.answer(
         f"👋 Привет, <b>{message.from_user.full_name}</b>!\n\n"
         "Я — твой AI-помощник. Вот что я умею:\n\n"
-        "💬 Просто напиши мне — отвечу на любой вопрос\n"
-        "🖼 /img &lt;описание&gt; — сгенерирую изображение\n"
+        "💬 Напиши мне — отвечу на любой вопрос\n"
+        "🖼 Напиши <b>сгенерируй/создай/нарисуй фото ...</b> — сделаю картинку\n"
         "🔊 Отправь голосовое — распознаю и отвечу\n"
         "🗑 /clear — очищу историю диалога\n"
         "❓ /help — список всех команд"
@@ -28,7 +83,7 @@ async def help_handler(message: Message):
     await message.answer(
         "📋 <b>Список команд:</b>\n\n"
         "💬 <b>Текст</b> — задай любой вопрос\n"
-        "🖼 /img &lt;описание&gt; — генерация изображения\n"
+        "🖼 <b>Сгенерируй/создай фото ...</b> — генерация изображения\n"
         "🔊 <b>Голосовое</b> — распознавание речи + ответ\n"
         "🗑 /clear — очистить историю диалога\n"
         "❓ /help — эта справка"
@@ -45,31 +100,50 @@ async def clear_handler(message: Message):
 async def chat_handler(message: Message):
     user_id = message.from_user.id
     user_text = message.text
+    is_group = message.chat.type in ("group", "supergroup")
+
+    if is_group:
+        bot_info = await message.bot.get_me()
+        bot_username = bot_info.username
+        is_mentioned = f"@{bot_username}" in user_text
+        is_reply_to_bot = (
+            message.reply_to_message and
+            message.reply_to_message.from_user and
+            message.reply_to_message.from_user.username == bot_username
+        )
+
+        if is_mentioned or is_reply_to_bot:
+            user_text = user_text.replace(f"@{bot_username}", "").strip()
+        elif random.random() > 0.05:
+            return
 
     await message.bot.send_chat_action(message.chat.id, "typing")
-    await save_message(user_id, "user", user_text)
-
-    history = await get_history(user_id, MAX_HISTORY)
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "Ты умный и дружелюбный AI-помощник в Telegram. "
-                "Отвечай на русском языке, если пользователь пишет по-русски. "
-                "Будь полезным, точным и кратким."
-            )
-        }
-    ] + history
 
     try:
-        response = await ai.chat.completions.create(
-            model=AI_MODEL,
-            messages=messages,
-            max_tokens=1000
+        if await is_image_request(user_text):
+            await message.answer("🎨 Генерирую изображение, подожди...")
+            await message.bot.send_chat_action(message.chat.id, "upload_photo")
+            prompt = await extract_image_prompt(user_text)
+            image_file = await generate_image(prompt)
+            await message.answer_photo(
+                photo=image_file,
+                caption=f"🖼 <i>{user_text}</i>"
+            )
+            return
+
+        system_prompt = (
+            "Ты умный AI-помощник в Telegram. "
+            "Отвечай на русском языке если пишут по-русски. "
+            "Будь точным и кратким."
+        ) if not is_group else (
+            "Ты живой участник Telegram чата. "
+            "Вмешивайся в разговор естественно и по теме. "
+            "Отвечай коротко — 1-2 предложения. Без лишних вступлений. "
+            "Пиши на том языке на котором пишут в чате."
         )
-        answer = response.choices[0].message.content
-        await save_message(user_id, "assistant", answer)
+
+        answer = await ask_ai(user_id, user_text, system_prompt)
         await message.answer(answer)
+
     except Exception as e:
-        await message.answer(f"❌ Ошибка при обращении к AI: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
