@@ -2,7 +2,7 @@ import re
 import logging
 from typing import Callable, Dict, Any, Awaitable
 
-from aiogram import Router, F, BaseMiddleware
+from aiogram import Router, BaseMiddleware
 from aiogram.types import Message, ChatMemberUpdated, MessageReactionUpdated, TelegramObject
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION
 
@@ -11,31 +11,90 @@ from database.db import increment_banned, get_stats
 router = Router()
 logger = logging.getLogger(__name__)
 
-# ───── Паттерны шлюхоботов ─────
-SLUT_PATTERNS = [
-    r"onlyfan", r"only.?fan", r"of.?link", r"18\+", r"nsfw",
-    r"\bсекс\b", r"\bintim", r"\bэскорт", r"\bescort",
-    r"заработ", r"доход", r"\d{4,}.*руб", r"privat", r"vip.?girl",
-    r"hot.?girl", r"sexy", r"xxx", r"porn", r"nude", r"naked",
-    r"модел", r"фото.?видео", r"подпис", r"переход", r"ссылк",
-    r"пиши в лс", r"пиши мне", r"напиши мне", r"писать в личк",
-    r"t\.me\/\+", r"t\.me\/[a-z0-9_]{5,}",
-    r"доход в день",
+# ───── Явные стоп-слова (срабатывают одиночно — 100% спам) ─────
+# Только то что никогда не встречается в нормальной речи
+HARD_PATTERNS = [
+    r"onlyfan", r"only.?fan", r"of.?link",
+    r"\bnsfw\b", r"\bxxx\b", r"\bporn\b", r"\bnude\b", r"\bnaked\b",
+    r"\bescort\b", r"\bэскорт\b",
+    r"vip.?girl", r"hot.?girl",
+    r"t\.me\/\+[a-z0-9]+",          # инвайт-ссылки t.me/+xxxxx
 ]
 
-SLUT_EMOJIS = ["💋", "🍑", "👅", "💦", "🔞", "😈", "🌶"]
+# ───── Мягкие признаки (нужно 2+ для бана) ─────
+SOFT_PATTERNS = [
+    r"18\+",
+    r"\bintim\b", r"\bинтим\b",
+    r"\bsexy\b",
+    r"пиши.{0,5}(лс|лично|мне)",
+    r"напиши.{0,5}мне",
+    r"писать.{0,10}лич",
+    r"заработ.{0,20}(день|час|неделю|руб|тыс|\$)",
+    r"доход.{0,20}(день|час|неделю|руб|тыс|\$)",
+    r"\d{3,}.{0,10}(руб|тыс|к) в (день|час)",
+    r"подпис.{0,15}(канал|ссылк|перейд)",
+    r"переход.{0,10}(ссылк|канал)",
+    r"t\.me\/[a-z0-9_]{5,}",        # любая t.me ссылка — мягкий признак
+    r"фото.{0,5}видео.{0,20}(личн|лс|прива)",
+    r"privat.{0,10}(фото|фот|контент)",
+]
+
+SLUT_EMOJIS = ["💋", "🍑", "👅", "💦", "🔞", "😈"]
+
+# ───── Паттерны только для имён профилей (строгие) ─────
+NAME_PATTERNS = [
+    r"onlyfan", r"only.?fan", r"\bnsfw\b", r"\bxxx\b", r"\bporn\b",
+    r"\bnude\b", r"\bnaked\b", r"\bescort\b", r"\bэскорт\b",
+    r"vip.?girl", r"hot.?girl", r"\bsexy\b", r"18\+",
+    r"\bintim\b", r"\bинтим\b",
+]
 
 
-def is_slutbot(text: str) -> bool:
+def _count_soft(text: str) -> int:
+    """Считает сколько мягких признаков найдено в тексте"""
+    text_lower = text.lower()
+    count = 0
+    for pattern in SOFT_PATTERNS:
+        if re.search(pattern, text_lower):
+            count += 1
+    return count
+
+
+def is_slutbot_message(text: str) -> bool:
+    """Проверяет текст сообщения — нужен хотя бы 1 жёсткий ИЛИ 2+ мягких признака"""
     if not text:
         return False
     text_lower = text.lower()
-    for pattern in SLUT_PATTERNS:
+
+    # Жёсткие паттерны — достаточно одного
+    for pattern in HARD_PATTERNS:
         if re.search(pattern, text_lower):
             return True
-    for emoji in SLUT_EMOJIS:
-        if text.count(emoji) >= 2:
+
+    # Мягкие паттерны — нужно 2+
+    if _count_soft(text) >= 2:
+        return True
+
+    # 3+ сексуальных эмодзи в одном сообщении
+    emoji_count = sum(text.count(e) for e in SLUT_EMOJIS)
+    if emoji_count >= 3:
+        return True
+
+    return False
+
+
+def is_slutbot_name(name: str) -> bool:
+    """Проверяет имя профиля — более строгие паттерны"""
+    if not name:
+        return False
+    name_lower = name.lower()
+    for pattern in NAME_PATTERNS:
+        if re.search(pattern, name_lower):
             return True
+    # 2+ сексуальных эмодзи в имени
+    emoji_count = sum(name.count(e) for e in SLUT_EMOJIS)
+    if emoji_count >= 2:
+        return True
     return False
 
 
@@ -56,7 +115,6 @@ async def ban_slutbot(bot, chat_id: int, user_id: int, username: str):
 
 
 # ───── Middleware для проверки текстовых сообщений ─────
-# Использует middleware чтобы НЕ блокировать другие обработчики (ai_chat и т.д.)
 class AntiSlutMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -67,16 +125,17 @@ class AntiSlutMiddleware(BaseMiddleware):
         if event.chat.type in ("group", "supergroup") and event.from_user and not event.from_user.is_bot:
             user = event.from_user
             text = event.text or ""
-            full_name = f"{user.first_name or ''} {user.last_name or ''}"
+            full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
             username = user.username or full_name
 
-            if is_slutbot(text) or is_slutbot(full_name):
+            # Имя — строгая проверка, текст — комбинированная
+            if is_slutbot_name(full_name) or is_slutbot_message(text):
                 try:
                     await event.delete()
                 except Exception:
                     pass
                 await ban_slutbot(event.bot, event.chat.id, user.id, username)
-                return  # не передаём дальше — пользователь забанен
+                return
 
         return await handler(event, data)
 
@@ -88,15 +147,10 @@ async def on_user_join(event: ChatMemberUpdated):
     if user.is_bot:
         return
 
-    full_name = f"{user.first_name or ''} {user.last_name or ''}"
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     username = user.username or full_name
 
-    if is_slutbot(full_name):
-        await ban_slutbot(event.bot, event.chat.id, user.id, username)
-        return
-
-    emoji_count = sum(full_name.count(e) for e in SLUT_EMOJIS)
-    if emoji_count >= 2:
+    if is_slutbot_name(full_name):
         await ban_slutbot(event.bot, event.chat.id, user.id, username)
 
 
@@ -107,8 +161,8 @@ async def on_reaction_slutcheck(event: MessageReactionUpdated):
         return
 
     user = event.user
-    full_name = f"{user.first_name or ''} {user.last_name or ''}"
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     username = user.username or full_name
 
-    if is_slutbot(full_name):
+    if is_slutbot_name(full_name):
         await ban_slutbot(event.bot, event.chat.id, user.id, username)
