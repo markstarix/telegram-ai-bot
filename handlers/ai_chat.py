@@ -1,3 +1,4 @@
+import io
 import random
 import base64
 from datetime import datetime
@@ -15,6 +16,11 @@ router = Router()
 ai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 DAILY_IMAGE_LIMIT = 3
+
+# Голосовые настройки
+TTS_VOICE = "onyx"
+TTS_CHANCE = 0.20  # 20% шанс голосового ответа
+TTS_MAX_LEN = 400  # не озвучиваем слишком длинные ответы
 
 IMAGE_TRIGGERS = [
     "сгенерируй фото", "сгенерируй картинку", "сгенерируй изображение",
@@ -76,6 +82,31 @@ async def ask_ai(user_id: int, user_text: str, system_prompt: str) -> str:
     answer = response.choices[0].message.content
     await save_message(user_id, "assistant", answer)
     return answer
+
+
+async def text_to_voice(text: str) -> BufferedInputFile:
+    """Конвертирует текст в голосовое сообщение через OpenAI TTS"""
+    response = await ai.audio.speech.create(
+        model="tts-1",
+        voice=TTS_VOICE,
+        input=text,
+        response_format="ogg",
+    )
+    audio_bytes = response.content
+    return BufferedInputFile(audio_bytes, filename="voice.ogg")
+
+
+async def send_answer(message: Message, answer: str):
+    """Отправляет ответ — текстом или голосовым (20% шанс)"""
+    if len(answer) <= TTS_MAX_LEN and random.random() < TTS_CHANCE:
+        try:
+            await message.bot.send_chat_action(message.chat.id, "record_voice")
+            voice_file = await text_to_voice(answer)
+            await message.answer_voice(voice_file)
+            return
+        except Exception:
+            pass  # если TTS упал — отвечаем текстом
+    await message.answer(answer)
 
 
 @router.message(CommandStart())
@@ -194,7 +225,7 @@ async def chat_handler(message: Message):
         )
 
         answer = await ask_ai(user_id, user_text, system_prompt)
-        await message.answer(answer)
+        await send_answer(message, answer)
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
