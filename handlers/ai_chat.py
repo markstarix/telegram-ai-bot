@@ -209,20 +209,26 @@ async def chat_handler(message: Message):
                 search_context = f"\n\nАктуальная информация из интернета (используй её в ответе):\n{search_result}"
 
         # 4. Обычный AI-ответ
-        system_prompt = (
+        base_prompt = (
             f"Сегодня {today}. "
             "Ты умный AI-помощник в Telegram. "
             "Отвечай на русском языке если пишут по-русски. "
+            "Ты умеешь отправлять голосовые сообщения — иногда отвечаешь голосом, это нормально. "
+            "Никогда не говори что не можешь отвечать голосом. "
             "Будь точным и кратким."
             + search_context
-        ) if not is_group else (
+        )
+        group_prompt = (
             f"Сегодня {today}. "
             "Ты живой участник Telegram чата. "
             "Вмешивайся в разговор естественно и по теме. "
             "Отвечай коротко — 1-2 предложения. Без лишних вступлений. "
+            "Ты умеешь отправлять голосовые сообщения — иногда отвечаешь голосом, это нормально. "
+            "Никогда не говори что не можешь отвечать голосом. "
             "Пиши на том языке на котором пишут в чате."
             + search_context
         )
+        system_prompt = group_prompt if is_group else base_prompt
 
         answer = await ask_ai(user_id, user_text, system_prompt)
         await send_answer(message, answer)
