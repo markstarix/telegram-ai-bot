@@ -90,21 +90,22 @@ async def text_to_voice(text: str) -> BufferedInputFile:
         model="tts-1",
         voice=TTS_VOICE,
         input=text,
-        response_format="ogg",
+        response_format="opus",  # корректный формат для Telegram voice
     )
     audio_bytes = response.content
     return BufferedInputFile(audio_bytes, filename="voice.ogg")
 
 
-async def send_answer(message: Message, answer: str):
-    """Отправляет ответ — текстом или голосовым (20% шанс)"""
-    if len(answer) <= TTS_MAX_LEN and random.random() < TTS_CHANCE:
+async def send_answer(message: Message, answer: str, force_voice: bool = False):
+    """Отправляет ответ — текстом или голосовым"""
+    use_voice = force_voice or (len(answer) <= TTS_MAX_LEN and random.random() < TTS_CHANCE)
+    if use_voice:
         try:
             await message.bot.send_chat_action(message.chat.id, "record_voice")
             voice_file = await text_to_voice(answer)
             await message.answer_voice(voice_file)
             return
-        except Exception:
+        except Exception as e:
             pass  # если TTS упал — отвечаем текстом
     await message.answer(answer)
 
@@ -145,6 +146,12 @@ async def clear_handler(message: Message):
     await message.answer("🗑 История диалога очищена!")
 
 
+VOICE_REQUEST_TRIGGERS = [
+    "голосом", "голосовым", "голосовое", "войсом", "войс",
+    "ответь голосом", "скажи голосом", "voice", "speak"
+]
+
+
 @router.message(F.text)
 async def chat_handler(message: Message):
     user_id = message.from_user.id
@@ -165,6 +172,10 @@ async def chat_handler(message: Message):
             user_text = user_text.replace(f"@{bot_username}", "").strip()
         elif random.random() > 0.05:
             return
+
+    # Проверяем явный запрос голосового ответа
+    text_lower = user_text.lower()
+    force_voice = any(t in text_lower for t in VOICE_REQUEST_TRIGGERS)
 
     await message.bot.send_chat_action(message.chat.id, "typing")
 
@@ -231,7 +242,7 @@ async def chat_handler(message: Message):
         system_prompt = group_prompt if is_group else base_prompt
 
         answer = await ask_ai(user_id, user_text, system_prompt)
-        await send_answer(message, answer)
+        await send_answer(message, answer, force_voice=force_voice)
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
